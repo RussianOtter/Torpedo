@@ -667,9 +667,15 @@ class addressing():
 			elif len(os.listdir(path)) > 2:
 				self.bdyn = eval(open(path+"stat.dyn").read())
 			else:
-				print "..: Notice :.. Max level scan is required before\ndynamic scanning can be activated!"
-				print "..: Level Switched :.."+(" "*14)+"..:  MAX  :.."
-				args.network_level = "max"
+				print "..: Notice :.. Default Scan Actived - New Network"
+				print "..: Level Switched :.."+(" "*12)+"..: Default :.."
+				print "..:      End Default Scan When Complete!      :.."
+				args.network_level = "local"
+				args.level = "passive"
+				args.ports = [80,443]
+				args.ttl = 8
+				args.smooth = True
+				args.rate = 1
 	
 	def next_local(self):
 		if self.nlocal == 255:
