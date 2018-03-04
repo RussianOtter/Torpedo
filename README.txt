@@ -3,25 +3,7 @@
 #        | (   | |    |   |  __/ (   | (   |    #
 #       _|\___/ _|    .__/ \___|\__,_|\___/     #
 #         Intrusion  _|  Detection System       #
-_ __ ___  https://paypal.me/russianotter ___ __ _
-    |                  -*-                  |
-    |_ __  _ -   Savage Security   - _  __ _|. ;
-      |                                   |;.:';.
- ; .' |           [ Features ]            | :".;'
-":'.' |                                   |;,.|.'
-:;':.;|   [ IDS ]-[ SSH Access ]          | ;\|/:
-';.": |     |||                           | .| |
-'.|.,;|   [ Honeypot ]                    | :| |:      
-:\|/; |     ||                            |  | |.
- | |. |   [ Vuln Scans ]-[ Verbose ]      | .| |
-:| |: |     |    |          |             |  | |'
-.| |  |   [ Alerts ]-[ Exploit ]          |  | |
- | |. |       |           |               |  \_/
-'| |  |   [ Speed ]-[ Document ]          |
- | |  |                                   |
- \_/  | [ Passive ]          [ Security ] |
-     _|          [   Defcon   ]           |_
-_ __|__                                   __|__ _
+
 _ __|__ _ http://paypal.me/russianotter _ __|__ _
 
   QuadTorp Intrusion Dection System is designed
